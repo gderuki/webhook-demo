@@ -6,16 +6,39 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      - webhook-client
+      - webhook-client-a
+      - webhook-client-b
+      - webhook-client-c
     environment:
       SERVER_PORT: 8080
-      WEBHOOK_URL: http://webhook-client:8081/webhooks/notifications
+      WEBHOOK_URLS: http://webhook-client-a:8081/webhooks/notifications,http://webhook-client-b:8081/webhooks/notifications,http://webhook-client-c:8081/webhooks/notifications
 
-  webhook-client:
+  webhook-client-a:
     build:
       context: ./webhook-client
       dockerfile: Dockerfile
     ports:
-      - "8081:8081"
+      - "18081:8081"
     environment:
       SERVER_PORT: 8081
+      CLIENT_NAME: client-a
+
+  webhook-client-b:
+    build:
+      context: ./webhook-client
+      dockerfile: Dockerfile
+    ports:
+      - "18082:8081"
+    environment:
+      SERVER_PORT: 8081
+      CLIENT_NAME: client-b
+
+  webhook-client-c:
+    build:
+      context: ./webhook-client
+      dockerfile: Dockerfile
+    ports:
+      - "18083:8081"
+    environment:
+      SERVER_PORT: 8081
+      CLIENT_NAME: client-c
