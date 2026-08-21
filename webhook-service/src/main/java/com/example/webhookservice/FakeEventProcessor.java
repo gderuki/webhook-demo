@@ -48,22 +48,26 @@ public class FakeEventProcessor {
     private void runLoop() {
         while (!Thread.currentThread().isInterrupted()) {
             try {
-                long waitMs = randomBetween(5000, 10000);
-                log.info("Waiting {} ms before creating next fake event", waitMs);
-                Thread.sleep(waitMs);
+                log.info("Waiting 5000 ms before creating next fake event batch");
+                Thread.sleep(5000);
 
                 String eventId = UUID.randomUUID().toString().substring(0, 8);
                 long processingMs = randomBetween(1000, 5000);
-                log.info("Starting fake event {} (processing time {} ms)", eventId, processingMs);
+                log.info("Starting fake event batch {} (processing time {} ms)", eventId, processingMs);
                 Thread.sleep(processingMs);
 
-                NotificationRequest notification = new NotificationRequest(
-                        "EVENT_COMPLETED",
-                        "Event " + eventId + " completed"
-                );
+                String[] eventTypes = {"EVENT_COMPLETED", "OTHER_EVENT"};
 
-                boolean delivered = notificationSender.send(notification);
-                log.info("Fake event {} finished and delivered={} ", eventId, delivered);
+                for (String eventType : eventTypes) {
+                    NotificationRequest notification = new NotificationRequest(
+                            eventType,
+                            "Event " + eventId + " completed for " + eventType,
+                            eventId + "-" + eventType
+                    );
+
+                    boolean delivered = notificationSender.send(notification);
+                    log.info("Fake event {} type {} finished and delivered={} ", eventId, eventType, delivered);
+                }
             } catch (InterruptedException ex) {
                 Thread.currentThread().interrupt();
                 break;

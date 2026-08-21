@@ -3,11 +3,16 @@ package com.example.webhookservice;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpStatusCodeException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class NotificationSender {
@@ -19,14 +24,22 @@ public class NotificationSender {
 
     public NotificationSender(SubscriptionRepository subscriptionRepository) {
         this.subscriptionRepository = subscriptionRepository;
-        this.restClient = RestClient.builder().build();
+
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(2000);
+        requestFactory.setReadTimeout(2000);
+
+        this.restClient = RestClient.builder()
+                .requestFactory(requestFactory)
+                .build();
     }
 
     public boolean send(NotificationRequest request) {
-        List<Subscription> subscribers = subscriptionRepository.findByEventType(request.type());
+        NotificationRequest normalized = normalizeEventId(request);
+        List<Subscription> subscribers = subscriptionRepository.findByEventType(normalized.type());
 
         if (subscribers.isEmpty()) {
-            log.info("No subscribers registered for event type {}", request.type());
+            log.info("No subscribers registered for event type {}", normalized.type());
             return true;
         }
 
@@ -34,24 +47,50 @@ public class NotificationSender {
 
         for (Subscription subscription : subscribers) {
             String callbackUrl = subscription.callbackUrl();
-
-            log.info("Delivering {} to subscription {} -> {}", request.type(), subscription.id(), callbackUrl);
+            long start = System.nanoTime();
 
             try {
                 restClient.post()
                         .uri(callbackUrl)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .body(request)
+                        .body(normalized)
                         .retrieve()
                         .toBodilessEntity();
 
-                log.info("Delivered {} to subscription {} -> {}", request.type(), subscription.id(), callbackUrl);
+                long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+                log.info("Delivery event {} subscription {} callback {} result=SUCCESS duration={} ms",
+                        normalized.eventId(), subscription.id(), callbackUrl, durationMs);
             } catch (RestClientException ex) {
-                log.error("Failed to deliver {} to subscription {} -> {}", request.type(), subscription.id(), callbackUrl, ex);
+                long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+                String result = resultLabel(ex);
+                log.error("Delivery event {} subscription {} callback {} result={} duration={} ms error={}",
+                        normalized.eventId(), subscription.id(), callbackUrl, result, durationMs, ex.getMessage());
                 allDelivered = false;
             }
         }
 
         return allDelivered;
+    }
+
+    private NotificationRequest normalizeEventId(NotificationRequest request) {
+        if (request == null) {
+            return new NotificationRequest("UNKNOWN", "", UUID.randomUUID().toString());
+        }
+
+        if (request.eventId() == null || request.eventId().isBlank()) {
+            return new NotificationRequest(request.type(), request.message(), UUID.randomUUID().toString());
+        }
+
+        return request;
+    }
+
+    private String resultLabel(RestClientException ex) {
+        if (ex instanceof ResourceAccessException) {
+            return "TIMEOUT";
+        }
+        if (ex instanceof HttpStatusCodeException httpEx) {
+            return "HTTP " + httpEx.getStatusCode().value();
+        }
+        return "ERROR";
     }
 }

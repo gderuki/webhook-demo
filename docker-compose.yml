@@ -7,7 +7,7 @@ services:
       - "8080:8080"
     environment:
       SERVER_PORT: 8080
-      FAKE_EVENT_PROCESSOR_ENABLED: "false"
+      FAKE_EVENT_PROCESSOR_ENABLED: "true"
 
   webhook-client-a:
     build:
@@ -20,6 +20,7 @@ services:
     environment:
       SERVER_PORT: 8081
       CLIENT_NAME: client-a
+      CLIENT_BEHAVIOR: SUCCESS
       CALLBACK_URL: http://webhook-client-a:8081/webhooks/notifications
       WEBHOOK_SERVICE_URL: http://webhook-service:8080
       EVENT_TYPES: EVENT_COMPLETED
@@ -35,9 +36,10 @@ services:
     environment:
       SERVER_PORT: 8081
       CLIENT_NAME: client-b
+      CLIENT_BEHAVIOR: RANDOM_500
       CALLBACK_URL: http://webhook-client-b:8081/webhooks/notifications
       WEBHOOK_SERVICE_URL: http://webhook-service:8080
-      EVENT_TYPES: OTHER_EVENT
+      EVENT_TYPES: EVENT_COMPLETED
 
   webhook-client-c:
     build:
@@ -50,6 +52,7 @@ services:
     environment:
       SERVER_PORT: 8081
       CLIENT_NAME: client-c
+      CLIENT_BEHAVIOR: TIMEOUT
       CALLBACK_URL: http://webhook-client-c:8081/webhooks/notifications
       WEBHOOK_SERVICE_URL: http://webhook-service:8080
       EVENT_TYPES: EVENT_COMPLETED
