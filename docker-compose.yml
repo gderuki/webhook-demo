@@ -5,6 +5,8 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8080:8080"
+    depends_on:
+      - webhook-client
     environment:
       SERVER_PORT: 8080
       WEBHOOK_URL: http://webhook-client:8081/webhooks/notifications
