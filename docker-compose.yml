@@ -8,6 +8,10 @@ services:
     environment:
       SERVER_PORT: 8080
       FAKE_EVENT_PROCESSOR_ENABLED: "true"
+      WEBHOOK_HTTP_TIMEOUT_MS: "2000"
+      WEBHOOK_RETRY_MAX_ATTEMPTS: "3"
+      WEBHOOK_RETRY_INITIAL_DELAY_MS: "500"
+      WEBHOOK_RETRY_BACKOFF_MS: "1000"
 
   webhook-client-a:
     build:

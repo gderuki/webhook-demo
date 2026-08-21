@@ -2,6 +2,7 @@ package com.example.webhookservice;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
@@ -21,13 +22,25 @@ public class NotificationSender {
 
     private final RestClient restClient;
     private final SubscriptionRepository subscriptionRepository;
+    private final int maxAttempts;
+    private final long retryDelayMs;
+    private final long retryBackoffMs;
 
-    public NotificationSender(SubscriptionRepository subscriptionRepository) {
+    public NotificationSender(
+            SubscriptionRepository subscriptionRepository,
+            @Value("${WEBHOOK_HTTP_TIMEOUT_MS:2000}") int httpTimeoutMs,
+            @Value("${WEBHOOK_RETRY_MAX_ATTEMPTS:3}") int maxAttempts,
+            @Value("${WEBHOOK_RETRY_INITIAL_DELAY_MS:500}") long retryDelayMs,
+            @Value("${WEBHOOK_RETRY_BACKOFF_MS:1000}") long retryBackoffMs
+    ) {
         this.subscriptionRepository = subscriptionRepository;
+        this.maxAttempts = maxAttempts;
+        this.retryDelayMs = retryDelayMs;
+        this.retryBackoffMs = retryBackoffMs;
 
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
-        requestFactory.setConnectTimeout(2000);
-        requestFactory.setReadTimeout(2000);
+        requestFactory.setConnectTimeout(httpTimeoutMs);
+        requestFactory.setReadTimeout(httpTimeoutMs);
 
         this.restClient = RestClient.builder()
                 .requestFactory(requestFactory)
@@ -46,30 +59,60 @@ public class NotificationSender {
         boolean allDelivered = true;
 
         for (Subscription subscription : subscribers) {
-            String callbackUrl = subscription.callbackUrl();
+            boolean delivered = sendWithRetry(normalized, subscription);
+            if (!delivered) {
+                allDelivered = false;
+            }
+        }
+
+        return allDelivered;
+    }
+
+    private boolean sendWithRetry(NotificationRequest request, Subscription subscription) {
+        String callbackUrl = subscription.callbackUrl();
+
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             long start = System.nanoTime();
 
             try {
                 restClient.post()
                         .uri(callbackUrl)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .body(normalized)
+                        .body(request)
                         .retrieve()
                         .toBodilessEntity();
 
                 long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-                log.info("Delivery event {} subscription {} callback {} result=SUCCESS duration={} ms",
-                        normalized.eventId(), subscription.id(), callbackUrl, durationMs);
+                log.info("event={} subscription={} attempt={} result=SUCCESS duration={} ms callback={}",
+                        request.eventId(), subscription.id(), attempt, durationMs, callbackUrl);
+                return true;
             } catch (RestClientException ex) {
                 long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
                 String result = resultLabel(ex);
-                log.error("Delivery event {} subscription {} callback {} result={} duration={} ms error={}",
-                        normalized.eventId(), subscription.id(), callbackUrl, result, durationMs, ex.getMessage());
-                allDelivered = false;
+
+                log.info("event={} subscription={} attempt={} result={} duration={} ms callback={}",
+                        request.eventId(), subscription.id(), attempt, result, durationMs, callbackUrl);
+
+                if (!shouldRetry(ex) || attempt >= maxAttempts) {
+                    log.error("event={} subscription={} attempt={} result={} duration={} ms callback={} final_failure={}",
+                            request.eventId(), subscription.id(), attempt, result, durationMs, callbackUrl, ex.getMessage());
+                    return false;
+                }
+
+                long sleepMs = (attempt == 1) ? retryDelayMs : retryBackoffMs;
+                log.warn("event={} subscription={} attempt={} result={} duration={} ms retrying in {} ms callback={}",
+                        request.eventId(), subscription.id(), attempt, result, durationMs, sleepMs, callbackUrl);
+
+                try {
+                    Thread.sleep(sleepMs);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
             }
         }
 
-        return allDelivered;
+        return false;
     }
 
     private NotificationRequest normalizeEventId(NotificationRequest request) {
@@ -84,12 +127,22 @@ public class NotificationSender {
         return request;
     }
 
+    private boolean shouldRetry(RestClientException ex) {
+        if (ex instanceof ResourceAccessException) {
+            return true;
+        }
+        if (ex instanceof HttpStatusCodeException httpEx) {
+            return httpEx.getStatusCode().is5xxServerError();
+        }
+        return false;
+    }
+
     private String resultLabel(RestClientException ex) {
         if (ex instanceof ResourceAccessException) {
             return "TIMEOUT";
         }
         if (ex instanceof HttpStatusCodeException httpEx) {
-            return "HTTP " + httpEx.getStatusCode().value();
+            return "HTTP_" + httpEx.getStatusCode().value();
         }
         return "ERROR";
     }
