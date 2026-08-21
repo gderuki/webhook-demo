@@ -5,40 +5,51 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8080:8080"
-    depends_on:
-      - webhook-client-a
-      - webhook-client-b
-      - webhook-client-c
     environment:
       SERVER_PORT: 8080
-      WEBHOOK_URLS: http://webhook-client-a:8081/webhooks/notifications,http://webhook-client-b:8081/webhooks/notifications,http://webhook-client-c:8081/webhooks/notifications
+      FAKE_EVENT_PROCESSOR_ENABLED: "false"
 
   webhook-client-a:
     build:
       context: ./webhook-client
       dockerfile: Dockerfile
+    depends_on:
+      - webhook-service
     ports:
       - "18081:8081"
     environment:
       SERVER_PORT: 8081
       CLIENT_NAME: client-a
+      CALLBACK_URL: http://webhook-client-a:8081/webhooks/notifications
+      WEBHOOK_SERVICE_URL: http://webhook-service:8080
+      EVENT_TYPES: EVENT_COMPLETED
 
   webhook-client-b:
     build:
       context: ./webhook-client
       dockerfile: Dockerfile
+    depends_on:
+      - webhook-service
     ports:
       - "18082:8081"
     environment:
       SERVER_PORT: 8081
       CLIENT_NAME: client-b
+      CALLBACK_URL: http://webhook-client-b:8081/webhooks/notifications
+      WEBHOOK_SERVICE_URL: http://webhook-service:8080
+      EVENT_TYPES: OTHER_EVENT
 
   webhook-client-c:
     build:
       context: ./webhook-client
       dockerfile: Dockerfile
+    depends_on:
+      - webhook-service
     ports:
       - "18083:8081"
     environment:
       SERVER_PORT: 8081
       CLIENT_NAME: client-c
+      CALLBACK_URL: http://webhook-client-c:8081/webhooks/notifications
+      WEBHOOK_SERVICE_URL: http://webhook-service:8080
+      EVENT_TYPES: EVENT_COMPLETED

@@ -4,6 +4,7 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.Random;
@@ -17,15 +18,23 @@ public class FakeEventProcessor {
     private static final Logger log = LoggerFactory.getLogger(FakeEventProcessor.class);
 
     private final NotificationSender notificationSender;
+    private final boolean enabled;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Random random = new Random();
 
-    public FakeEventProcessor(NotificationSender notificationSender) {
+    public FakeEventProcessor(NotificationSender notificationSender,
+                              @Value("${FAKE_EVENT_PROCESSOR_ENABLED:true}") boolean enabled) {
         this.notificationSender = notificationSender;
+        this.enabled = enabled;
     }
 
     @PostConstruct
     public void start() {
+        if (!enabled) {
+            log.info("Fake event processor disabled via FAKE_EVENT_PROCESSOR_ENABLED=false");
+            return;
+        }
+
         executor.submit(this::runLoop);
         log.info("Fake event processor started");
     }

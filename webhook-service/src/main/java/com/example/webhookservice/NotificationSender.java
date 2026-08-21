@@ -2,13 +2,11 @@ package com.example.webhookservice;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
-import java.util.Arrays;
 import java.util.List;
 
 @Service
@@ -17,31 +15,39 @@ public class NotificationSender {
     private static final Logger log = LoggerFactory.getLogger(NotificationSender.class);
 
     private final RestClient restClient;
-    private final List<String> webhookUrls;
+    private final SubscriptionRepository subscriptionRepository;
 
-    public NotificationSender(@Value("${WEBHOOK_URLS:${WEBHOOK_URL:http://localhost:8081/webhooks/notifications}}") String webhookUrlsCsv) {
-        this.webhookUrls = Arrays.stream(webhookUrlsCsv.split(","))
-                .map(String::trim)
-                .filter(url -> !url.isEmpty())
-                .toList();
+    public NotificationSender(SubscriptionRepository subscriptionRepository) {
+        this.subscriptionRepository = subscriptionRepository;
         this.restClient = RestClient.builder().build();
     }
 
     public boolean send(NotificationRequest request) {
+        List<Subscription> subscribers = subscriptionRepository.findByEventType(request.type());
+
+        if (subscribers.isEmpty()) {
+            log.info("No subscribers registered for event type {}", request.type());
+            return true;
+        }
+
         boolean allDelivered = true;
 
-        for (String webhookUrl : webhookUrls) {
+        for (Subscription subscription : subscribers) {
+            String callbackUrl = subscription.callbackUrl();
+
+            log.info("Delivering {} to subscription {} -> {}", request.type(), subscription.id(), callbackUrl);
+
             try {
-                log.info("Delivering notification to client: {} | payload={}", webhookUrl, request);
                 restClient.post()
-                        .uri(webhookUrl)
+                        .uri(callbackUrl)
                         .contentType(MediaType.APPLICATION_JSON)
                         .body(request)
                         .retrieve()
                         .toBodilessEntity();
-                log.info("Delivered notification to client: {} | payload={}", webhookUrl, request);
+
+                log.info("Delivered {} to subscription {} -> {}", request.type(), subscription.id(), callbackUrl);
             } catch (RestClientException ex) {
-                log.error("Failed to deliver notification to {}: {}", webhookUrl, request, ex);
+                log.error("Failed to deliver {} to subscription {} -> {}", request.type(), subscription.id(), callbackUrl, ex);
                 allDelivered = false;
             }
         }
