@@ -1,8 +1,21 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: webhook_demo
+      POSTGRES_USER: webhook
+      POSTGRES_PASSWORD: webhook
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
   webhook-service:
     build:
       context: ./webhook-service
       dockerfile: Dockerfile
+    depends_on:
+      - postgres
     ports:
       - "8080:8080"
     environment:
@@ -12,6 +25,9 @@ services:
       WEBHOOK_RETRY_MAX_ATTEMPTS: "3"
       WEBHOOK_RETRY_INITIAL_DELAY_MS: "500"
       WEBHOOK_RETRY_BACKOFF_MS: "1000"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/webhook_demo
+      SPRING_DATASOURCE_USERNAME: webhook
+      SPRING_DATASOURCE_PASSWORD: webhook
 
   webhook-client-a:
     build:
@@ -60,3 +76,6 @@ services:
       CALLBACK_URL: http://webhook-client-c:8081/webhooks/notifications
       WEBHOOK_SERVICE_URL: http://webhook-service:8080
       EVENT_TYPES: EVENT_COMPLETED
+
+volumes:
+  postgres_data:

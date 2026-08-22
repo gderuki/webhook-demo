@@ -1,31 +1,12 @@
 package com.example.webhookservice;
 
-import org.springframework.stereotype.Repository;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 
-import java.util.Comparator;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 
-@Repository
-public class SubscriptionRepository {
+public interface SubscriptionRepository extends JpaRepository<Subscription, String> {
 
-    private final ConcurrentMap<String, Subscription> subscriptions = new ConcurrentHashMap<>();
-
-    public Subscription save(Subscription subscription) {
-        subscriptions.put(subscription.id(), subscription);
-        return subscription;
-    }
-
-    public List<Subscription> findAll() {
-        return subscriptions.values().stream()
-                .sorted(Comparator.comparing(Subscription::id))
-                .toList();
-    }
-
-    public List<Subscription> findByEventType(String eventType) {
-        return subscriptions.values().stream()
-                .filter(subscription -> subscription.eventTypes().contains(eventType))
-                .toList();
-    }
+    @Query("select s from Subscription s join s.eventTypes et where et = :eventType")
+    List<Subscription> findByEventType(String eventType);
 }

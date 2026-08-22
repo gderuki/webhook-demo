@@ -11,6 +11,7 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -22,18 +23,24 @@ public class NotificationSender {
 
     private final RestClient restClient;
     private final SubscriptionRepository subscriptionRepository;
+    private final DeliveryRepository deliveryRepository;
+    private final DeliveryAttemptRepository deliveryAttemptRepository;
     private final int maxAttempts;
     private final long retryDelayMs;
     private final long retryBackoffMs;
 
     public NotificationSender(
             SubscriptionRepository subscriptionRepository,
+            DeliveryRepository deliveryRepository,
+            DeliveryAttemptRepository deliveryAttemptRepository,
             @Value("${WEBHOOK_HTTP_TIMEOUT_MS:2000}") int httpTimeoutMs,
             @Value("${WEBHOOK_RETRY_MAX_ATTEMPTS:3}") int maxAttempts,
             @Value("${WEBHOOK_RETRY_INITIAL_DELAY_MS:500}") long retryDelayMs,
             @Value("${WEBHOOK_RETRY_BACKOFF_MS:1000}") long retryBackoffMs
     ) {
         this.subscriptionRepository = subscriptionRepository;
+        this.deliveryRepository = deliveryRepository;
+        this.deliveryAttemptRepository = deliveryAttemptRepository;
         this.maxAttempts = maxAttempts;
         this.retryDelayMs = retryDelayMs;
         this.retryBackoffMs = retryBackoffMs;
@@ -70,6 +77,8 @@ public class NotificationSender {
 
     private boolean sendWithRetry(NotificationRequest request, Subscription subscription) {
         String callbackUrl = subscription.callbackUrl();
+        Delivery delivery = new Delivery(request.eventId(), request.type(), subscription, "FAILED");
+        delivery = deliveryRepository.save(delivery);
 
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             long start = System.nanoTime();
@@ -83,17 +92,23 @@ public class NotificationSender {
                         .toBodilessEntity();
 
                 long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+                persistAttempt(delivery, attempt, "SUCCESS", durationMs);
+                delivery.setStatus("SUCCESS");
+                deliveryRepository.save(delivery);
                 log.info("event={} subscription={} attempt={} result=SUCCESS duration={} ms callback={}",
                         request.eventId(), subscription.id(), attempt, durationMs, callbackUrl);
                 return true;
             } catch (RestClientException ex) {
                 long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
                 String result = resultLabel(ex);
+                persistAttempt(delivery, attempt, result, durationMs);
 
                 log.info("event={} subscription={} attempt={} result={} duration={} ms callback={}",
                         request.eventId(), subscription.id(), attempt, result, durationMs, callbackUrl);
 
                 if (!shouldRetry(ex) || attempt >= maxAttempts) {
+                    delivery.setStatus("FAILED");
+                    deliveryRepository.save(delivery);
                     log.error("event={} subscription={} attempt={} result={} duration={} ms callback={} final_failure={}",
                             request.eventId(), subscription.id(), attempt, result, durationMs, callbackUrl, ex.getMessage());
                     return false;
@@ -107,12 +122,20 @@ public class NotificationSender {
                     Thread.sleep(sleepMs);
                 } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
+                    delivery.setStatus("FAILED");
+                    deliveryRepository.save(delivery);
                     return false;
                 }
             }
         }
 
+        delivery.setStatus("FAILED");
+        deliveryRepository.save(delivery);
         return false;
+    }
+
+    private void persistAttempt(Delivery delivery, int attemptNumber, String result, long durationMs) {
+        deliveryAttemptRepository.save(new DeliveryAttempt(delivery, attemptNumber, result, durationMs, Instant.now()));
     }
 
     private NotificationRequest normalizeEventId(NotificationRequest request) {
