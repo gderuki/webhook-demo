@@ -18,7 +18,7 @@
 
     <properties>
         <java.version>21</java.version>
-        <postgresql.version>42.7.5</postgresql.version>
+        <postgresql.version>42.7.12</postgresql.version>
         <flyway.version>10.22.0</flyway.version>
     </properties>
 
