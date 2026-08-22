@@ -10,8 +10,9 @@ Enterprise-grade direction. Humble beginnings. One step at a time.
 ## Rule for future assistants
 
 - After each change, print a short release-note style update.
-- Keep it brief: what changed, how to reproduce, and what to expect.
-- No long explanations unless asked.
+- Keep README.md as the quick reference; avoid churn during implementation.
+- Update README.md only when the user asks to commit/finalize or when behavior/features materially change.
+- Do not verify build whatsoever.
 
 ## Repro format
 
