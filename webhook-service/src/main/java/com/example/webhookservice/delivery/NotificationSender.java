@@ -1,7 +1,12 @@
-package com.example.webhookservice;
+package com.example.webhookservice.delivery;
 
+import com.example.webhookservice.api.NotificationRequest;
+import com.example.webhookservice.messaging.DeliveryProducer;
+import com.example.webhookservice.subscription.Subscription;
+import com.example.webhookservice.subscription.SubscriptionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.amqp.AmqpException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -18,13 +23,13 @@ import java.util.concurrent.TimeUnit;
 
 @Service
 public class NotificationSender {
-
     private static final Logger log = LoggerFactory.getLogger(NotificationSender.class);
 
     private final RestClient restClient;
     private final SubscriptionRepository subscriptionRepository;
     private final DeliveryRepository deliveryRepository;
     private final DeliveryAttemptRepository deliveryAttemptRepository;
+    private final DeliveryProducer deliveryProducer;
     private final int maxAttempts;
     private final long retryDelayMs;
     private final long retryBackoffMs;
@@ -33,6 +38,7 @@ public class NotificationSender {
             SubscriptionRepository subscriptionRepository,
             DeliveryRepository deliveryRepository,
             DeliveryAttemptRepository deliveryAttemptRepository,
+            DeliveryProducer deliveryProducer,
             @Value("${WEBHOOK_HTTP_TIMEOUT_MS:2000}") int httpTimeoutMs,
             @Value("${WEBHOOK_RETRY_MAX_ATTEMPTS:3}") int maxAttempts,
             @Value("${WEBHOOK_RETRY_INITIAL_DELAY_MS:500}") long retryDelayMs,
@@ -41,6 +47,7 @@ public class NotificationSender {
         this.subscriptionRepository = subscriptionRepository;
         this.deliveryRepository = deliveryRepository;
         this.deliveryAttemptRepository = deliveryAttemptRepository;
+        this.deliveryProducer = deliveryProducer;
         this.maxAttempts = maxAttempts;
         this.retryDelayMs = retryDelayMs;
         this.retryBackoffMs = retryBackoffMs;
@@ -48,10 +55,7 @@ public class NotificationSender {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(httpTimeoutMs);
         requestFactory.setReadTimeout(httpTimeoutMs);
-
-        this.restClient = RestClient.builder()
-                .requestFactory(requestFactory)
-                .build();
+        this.restClient = RestClient.builder().requestFactory(requestFactory).build();
     }
 
     public boolean send(NotificationRequest request) {
@@ -63,61 +67,50 @@ public class NotificationSender {
             return true;
         }
 
-        boolean allDelivered = true;
-
+        boolean allAccepted = true;
         for (Subscription subscription : subscribers) {
-            boolean delivered = sendWithRetry(normalized, subscription);
-            if (!delivered) {
-                allDelivered = false;
+            Delivery delivery = new Delivery(normalized.eventId(), normalized.type(), subscription);
+            delivery = deliveryRepository.save(delivery);
+            try {
+                deliveryProducer.publish(delivery, normalized);
+                log.info("producer event={} subscription={} deliveryId={} queued", normalized.eventId(), subscription.id(), delivery.id());
+            } catch (AmqpException ex) {
+                delivery.setStatus("FAILED");
+                deliveryRepository.save(delivery);
+                log.error("producer event={} subscription={} deliveryId={} publish_failed {}",
+                        normalized.eventId(), subscription.id(), delivery.id(), ex.getMessage());
+                allAccepted = false;
             }
         }
-
-        return allDelivered;
+        return allAccepted;
     }
 
-    private boolean sendWithRetry(NotificationRequest request, Subscription subscription) {
+    public boolean processDelivery(NotificationRequest request, Subscription subscription, Delivery delivery) {
         String callbackUrl = subscription.callbackUrl();
-        Delivery delivery = new Delivery(request.eventId(), request.type(), subscription, "FAILED");
-        delivery = deliveryRepository.save(delivery);
-
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             long start = System.nanoTime();
-
             try {
-                restClient.post()
-                        .uri(callbackUrl)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .body(request)
-                        .retrieve()
-                        .toBodilessEntity();
-
+                restClient.post().uri(callbackUrl).contentType(MediaType.APPLICATION_JSON).body(request).retrieve().toBodilessEntity();
                 long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
                 persistAttempt(delivery, attempt, "SUCCESS", durationMs);
                 delivery.setStatus("SUCCESS");
                 deliveryRepository.save(delivery);
-                log.info("event={} subscription={} attempt={} result=SUCCESS duration={} ms callback={}",
-                        request.eventId(), subscription.id(), attempt, durationMs, callbackUrl);
+                log.info("event={} subscription={} attempt={} result=SUCCESS duration={} ms callback={}", request.eventId(), subscription.id(), attempt, durationMs, callbackUrl);
                 return true;
             } catch (RestClientException ex) {
                 long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
                 String result = resultLabel(ex);
                 persistAttempt(delivery, attempt, result, durationMs);
-
-                log.info("event={} subscription={} attempt={} result={} duration={} ms callback={}",
-                        request.eventId(), subscription.id(), attempt, result, durationMs, callbackUrl);
+                log.info("event={} subscription={} attempt={} result={} duration={} ms callback={}", request.eventId(), subscription.id(), attempt, result, durationMs, callbackUrl);
 
                 if (!shouldRetry(ex) || attempt >= maxAttempts) {
                     delivery.setStatus("FAILED");
                     deliveryRepository.save(delivery);
-                    log.error("event={} subscription={} attempt={} result={} duration={} ms callback={} final_failure={}",
-                            request.eventId(), subscription.id(), attempt, result, durationMs, callbackUrl, ex.getMessage());
+                    log.error("event={} subscription={} attempt={} result={} duration={} ms callback={} final_failure={}", request.eventId(), subscription.id(), attempt, result, durationMs, callbackUrl, ex.getMessage());
                     return false;
                 }
-
                 long sleepMs = (attempt == 1) ? retryDelayMs : retryBackoffMs;
-                log.warn("event={} subscription={} attempt={} result={} duration={} ms retrying in {} ms callback={}",
-                        request.eventId(), subscription.id(), attempt, result, durationMs, sleepMs, callbackUrl);
-
+                log.warn("event={} subscription={} attempt={} result={} duration={} ms retrying in {} ms callback={}", request.eventId(), subscription.id(), attempt, result, durationMs, sleepMs, callbackUrl);
                 try {
                     Thread.sleep(sleepMs);
                 } catch (InterruptedException interrupted) {
@@ -128,7 +121,6 @@ public class NotificationSender {
                 }
             }
         }
-
         delivery.setStatus("FAILED");
         deliveryRepository.save(delivery);
         return false;
@@ -142,31 +134,21 @@ public class NotificationSender {
         if (request == null) {
             return new NotificationRequest("UNKNOWN", "", UUID.randomUUID().toString());
         }
-
         if (request.eventId() == null || request.eventId().isBlank()) {
             return new NotificationRequest(request.type(), request.message(), UUID.randomUUID().toString());
         }
-
         return request;
     }
 
     private boolean shouldRetry(RestClientException ex) {
-        if (ex instanceof ResourceAccessException) {
-            return true;
-        }
-        if (ex instanceof HttpStatusCodeException httpEx) {
-            return httpEx.getStatusCode().is5xxServerError();
-        }
+        if (ex instanceof ResourceAccessException) return true;
+        if (ex instanceof HttpStatusCodeException httpEx) return httpEx.getStatusCode().is5xxServerError();
         return false;
     }
 
     private String resultLabel(RestClientException ex) {
-        if (ex instanceof ResourceAccessException) {
-            return "TIMEOUT";
-        }
-        if (ex instanceof HttpStatusCodeException httpEx) {
-            return "HTTP_" + httpEx.getStatusCode().value();
-        }
+        if (ex instanceof ResourceAccessException) return "TIMEOUT";
+        if (ex instanceof HttpStatusCodeException httpEx) return "HTTP_" + httpEx.getStatusCode().value();
         return "ERROR";
     }
 }

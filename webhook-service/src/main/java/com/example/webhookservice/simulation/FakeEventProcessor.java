@@ -1,5 +1,7 @@
-package com.example.webhookservice;
+package com.example.webhookservice.simulation;
 
+import com.example.webhookservice.api.NotificationRequest;
+import com.example.webhookservice.delivery.NotificationSender;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -14,16 +16,13 @@ import java.util.concurrent.Executors;
 
 @Component
 public class FakeEventProcessor {
-
     private static final Logger log = LoggerFactory.getLogger(FakeEventProcessor.class);
-
     private final NotificationSender notificationSender;
     private final boolean enabled;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Random random = new Random();
 
-    public FakeEventProcessor(NotificationSender notificationSender,
-                              @Value("${FAKE_EVENT_PROCESSOR_ENABLED:true}") boolean enabled) {
+    public FakeEventProcessor(NotificationSender notificationSender, @Value("${FAKE_EVENT_PROCESSOR_ENABLED:true}") boolean enabled) {
         this.notificationSender = notificationSender;
         this.enabled = enabled;
     }
@@ -34,7 +33,6 @@ public class FakeEventProcessor {
             log.info("Fake event processor disabled via FAKE_EVENT_PROCESSOR_ENABLED=false");
             return;
         }
-
         executor.submit(this::runLoop);
         log.info("Fake event processor started");
     }
@@ -50,23 +48,15 @@ public class FakeEventProcessor {
             try {
                 log.info("Waiting 5000 ms before creating next fake event batch");
                 Thread.sleep(5000);
-
                 String eventId = UUID.randomUUID().toString().substring(0, 8);
                 long processingMs = randomBetween(1000, 5000);
                 log.info("Starting fake event batch {} (processing time {} ms)", eventId, processingMs);
                 Thread.sleep(processingMs);
-
                 String[] eventTypes = {"EVENT_COMPLETED", "OTHER_EVENT"};
-
                 for (String eventType : eventTypes) {
-                    NotificationRequest notification = new NotificationRequest(
-                            eventType,
-                            "Event " + eventId + " completed for " + eventType,
-                            eventId + "-" + eventType
-                    );
-
-                    boolean delivered = notificationSender.send(notification);
-                    log.info("Fake event {} type {} finished and delivered={} ", eventId, eventType, delivered);
+                    NotificationRequest notification = new NotificationRequest(eventType, "Event " + eventId + " completed for " + eventType, eventId + "-" + eventType);
+                    boolean accepted = notificationSender.send(notification);
+                    log.info("Fake event {} type {} finished and accepted={} ", eventId, eventType, accepted);
                 }
             } catch (InterruptedException ex) {
                 Thread.currentThread().interrupt();

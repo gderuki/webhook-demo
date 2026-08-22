@@ -1,4 +1,4 @@
-package com.example.webhookservice;
+package com.example.webhookservice.delivery;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -14,24 +14,16 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(
-        name = "delivery_attempt",
-        indexes = {
-                @Index(name = "idx_delivery_attempt_delivery", columnList = "delivery_id, attempt_number")
-        }
-)
+@Table(name = "delivery_attempt", indexes = {
+        @Index(name = "idx_delivery_attempt_delivery", columnList = "delivery_id, attempt_number")
+})
 public class DeliveryAttempt {
-
     @Id
     @Column(name = "id", nullable = false, length = 36)
     private String id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(
-            name = "delivery_id",
-            nullable = false,
-            foreignKey = @ForeignKey(name = "fk_delivery_attempt_delivery")
-    )
+    @JoinColumn(name = "delivery_id", nullable = false, foreignKey = @ForeignKey(name = "fk_delivery_attempt_delivery"))
     private Delivery delivery;
 
     @Column(name = "attempt_number", nullable = false)
@@ -46,8 +38,7 @@ public class DeliveryAttempt {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
-    protected DeliveryAttempt() {
-    }
+    protected DeliveryAttempt() {}
 
     public DeliveryAttempt(Delivery delivery, int attemptNumber, String result, long duration, Instant createdAt) {
         this.id = UUID.randomUUID().toString();
@@ -58,27 +49,10 @@ public class DeliveryAttempt {
         this.createdAt = createdAt;
     }
 
-    public String id() {
-        return id;
-    }
-
-    public Delivery delivery() {
-        return delivery;
-    }
-
-    public int attemptNumber() {
-        return attemptNumber;
-    }
-
-    public String result() {
-        return result;
-    }
-
-    public long duration() {
-        return duration;
-    }
-
-    public Instant createdAt() {
-        return createdAt;
-    }
+    public String id() { return id; }
+    public Delivery delivery() { return delivery; }
+    public int attemptNumber() { return attemptNumber; }
+    public String result() { return result; }
+    public long duration() { return duration; }
+    public Instant createdAt() { return createdAt; }
 }

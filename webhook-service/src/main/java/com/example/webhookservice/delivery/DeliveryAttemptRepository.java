@@ -1,4 +1,4 @@
-package com.example.webhookservice;
+package com.example.webhookservice.delivery;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 

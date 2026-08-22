@@ -1,4 +1,4 @@
-package com.example.webhookservice;
+package com.example.webhookservice.subscription;
 
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
@@ -58,15 +58,11 @@ public class Subscription {
         return new Subscription(callbackUrl, eventTypes);
     }
 
-    public String id() {
-        return id;
-    }
-
-    public String callbackUrl() {
-        return callbackUrl;
-    }
-
-    public List<String> eventTypes() {
-        return List.copyOf(eventTypes);
-    }
+    public String id() { return id; }
+    public String getId() { return id; }
+    public String callbackUrl() { return callbackUrl; }
+    public String getCallbackUrl() { return callbackUrl; }
+    public List<String> eventTypes() { return List.copyOf(eventTypes); }
+    public List<String> getEventTypes() { return List.copyOf(eventTypes); }
+    public void updateEventTypes(List<String> eventTypes) { this.eventTypes = eventTypes == null ? new ArrayList<>() : new ArrayList<>(eventTypes); }
 }

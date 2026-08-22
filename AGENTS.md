@@ -11,7 +11,10 @@ Enterprise-grade direction. Humble beginnings. One step at a time.
 
 - After each change, print a short release-note style update.
 - Keep README.md as the quick reference; avoid churn during implementation.
-- Update README.md only when the user asks to commit/finalize or when behavior/features materially change.
+- Do not update README.md while the user is still iterating on the implementation unless behavior/features materially change.
+- When the user explicitly asks to commit or finalize the work, update README.md before the commit so it reflects the current state of the project.
+- If the user asks to commit after manual testing, do the README update at that point and then commit everything together.
+- Never add a Co-authored-by trailer or any GitHub co-author metadata to commits.
 - Do not verify build whatsoever.
 
 ## Repro format

@@ -1,4 +1,4 @@
-package com.example.webhookservice;
+package com.example.webhookservice.subscription;
 
 import java.util.List;
 
