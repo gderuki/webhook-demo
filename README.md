@@ -1,46 +1,51 @@
 # Webhook Demo
 
 ## Purpose
-Learning project for webhook architecture, reliability, and system-design tradeoffs.
+Learning project for webhook architecture, reliability, and async decoupling using RabbitMQ.
 
 ## Current Architecture
 ```text
-webhook-client-a/b/c -> webhook-service -> PostgreSQL (subscriptions + delivery history)
-                                 \-> event filtering + sequential retry delivery
+webhook-client-a/b/c -> webhook-service -> RabbitMQ -> webhook-worker -> webhook-client-a/b/c
+                          |
+                          +-> PostgreSQL (subscriptions + delivery history)
 ```
-Service matches subscriptions to event types, delivers callbacks one by one, and stores durable subscription + delivery state in PostgreSQL. Clients simulate `SUCCESS`, `RANDOM_500`, and `TIMEOUT` behaviors.
+The producer persists each delivery and immediately publishes a message to the queue. The worker consumes queued items and performs the actual webhook call with retry logic. PostgreSQL stores subscriptions, delivery records, and per-attempt results.
 
 ## Current Features
-- Docker Compose setup
+- Docker Compose stack with PostgreSQL, RabbitMQ, service, worker, and client apps
 - PostgreSQL + Flyway + Spring Data JPA
-- webhook service + multiple clients from same image
-- dynamic `POST /subscriptions`
-- callback URL + event type subscriptions
-- persistent subscription storage
-- event filtering
-- configurable client behavior (`SUCCESS`, `RANDOM_500`, `TIMEOUT`)
-- synchronous sequential delivery
-- HTTP timeout
-- retry with limited attempts and backoff
+- durable subscription and delivery persistence
+- RabbitMQ queue-based async delivery
+- producer/consumer decoupling
+- worker-side delivery retries with backoff
+- HTTP timeout and 5xx retry handling
 - per-delivery and per-attempt persistence
-- fake event processor
+- dynamic `POST /subscriptions`
+- event filtering by event type
+- fake event processor generating webhook traffic
+- client behaviors: `SUCCESS`, `RANDOM_500`, and `TIMEOUT`
 
 ## Design Notes
-- subscriptions are persisted in PostgreSQL
-- delivery rows and retry attempts are stored for each event/subscription pair
-- delivery remains intentionally synchronous and sequential
-- clients intentionally simulate failures
-- Docker Compose configures startup; subscriptions are registered via the runtime API
+- the service does not wait for downstream webhook completion when publishing to RabbitMQ
+- the worker is responsible for the actual callback and retry loop
+- queue buffering lets the producer keep moving while a slow client is still retrying
+- delivery status and attempt history remain stored in PostgreSQL for inspection
 
 ## Run
 ```bash
 docker compose up --build -d
 ```
-Inspect:
+Useful checks:
 ```bash
 docker compose ps
 docker compose logs -f webhook-service
+docker compose logs -f webhook-worker
 curl http://localhost:8080/subscriptions
+```
+RabbitMQ management is available at:
+```text
+http://localhost:15672
+guest / guest
 ```
 
 ## Useful API
@@ -54,16 +59,16 @@ Example:
 ```
 
 ## Current Limitations
-- state is still local to a single Postgres instance
-- no durable messaging beyond the current DB-backed flow
-- no shared state across multiple service instances yet
-- no idempotency or DLQ yet
+- single queue and single worker in this demo
+- no dead-letter queue or retry visibility dashboard yet
+- no multi-instance coordination beyond the queue abstraction
+- no idempotency enforcement yet
 
 ## Next Step
-Use the persisted delivery state as the base for later operational improvements, such as multi-instance awareness and richer delivery visibility.
+This async queueing milestone is the current baseline. The next improvement would be adding richer operational tooling around backlog monitoring, retries, and delivery observability.
 
 ## Agent Handoff
 - read this README before making changes
 - inspect code before assuming README details are still correct
 - keep scope tight; do not implement future architecture
-- update README when behavior materially changes or before finalizing a milestone
+- update README before a user-requested final commit or milestone handoff

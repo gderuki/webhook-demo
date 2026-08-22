@@ -32,7 +32,7 @@ public class Delivery {
     @Column(name = "event_type", nullable = false, length = 128)
     private String eventType;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @ManyToOne(fetch = FetchType.EAGER, optional = false)
     @JoinColumn(
             name = "subscription_id",
             nullable = false,

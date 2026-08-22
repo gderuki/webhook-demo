@@ -2,6 +2,7 @@ package com.example.webhookservice;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.amqp.AmqpException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -25,6 +26,7 @@ public class NotificationSender {
     private final SubscriptionRepository subscriptionRepository;
     private final DeliveryRepository deliveryRepository;
     private final DeliveryAttemptRepository deliveryAttemptRepository;
+    private final DeliveryProducer deliveryProducer;
     private final int maxAttempts;
     private final long retryDelayMs;
     private final long retryBackoffMs;
@@ -33,6 +35,7 @@ public class NotificationSender {
             SubscriptionRepository subscriptionRepository,
             DeliveryRepository deliveryRepository,
             DeliveryAttemptRepository deliveryAttemptRepository,
+            DeliveryProducer deliveryProducer,
             @Value("${WEBHOOK_HTTP_TIMEOUT_MS:2000}") int httpTimeoutMs,
             @Value("${WEBHOOK_RETRY_MAX_ATTEMPTS:3}") int maxAttempts,
             @Value("${WEBHOOK_RETRY_INITIAL_DELAY_MS:500}") long retryDelayMs,
@@ -41,6 +44,7 @@ public class NotificationSender {
         this.subscriptionRepository = subscriptionRepository;
         this.deliveryRepository = deliveryRepository;
         this.deliveryAttemptRepository = deliveryAttemptRepository;
+        this.deliveryProducer = deliveryProducer;
         this.maxAttempts = maxAttempts;
         this.retryDelayMs = retryDelayMs;
         this.retryBackoffMs = retryBackoffMs;
@@ -63,22 +67,28 @@ public class NotificationSender {
             return true;
         }
 
-        boolean allDelivered = true;
+        boolean allQueued = true;
 
         for (Subscription subscription : subscribers) {
-            boolean delivered = sendWithRetry(normalized, subscription);
-            if (!delivered) {
-                allDelivered = false;
+            Delivery delivery = new Delivery(normalized.eventId(), normalized.type(), subscription, "FAILED");
+            delivery = deliveryRepository.save(delivery);
+            try {
+                deliveryProducer.publish(delivery, normalized);
+                log.info("producer event={} subscription={} deliveryId={} queued", normalized.eventId(), subscription.id(), delivery.id());
+            } catch (AmqpException ex) {
+                delivery.setStatus("FAILED");
+                deliveryRepository.save(delivery);
+                log.error("producer event={} subscription={} deliveryId={} queue_failed {}",
+                        normalized.eventId(), subscription.id(), delivery.id(), ex.getMessage());
+                allQueued = false;
             }
         }
 
-        return allDelivered;
+        return allQueued;
     }
 
-    private boolean sendWithRetry(NotificationRequest request, Subscription subscription) {
+    public boolean processDelivery(NotificationRequest request, Subscription subscription, Delivery delivery) {
         String callbackUrl = subscription.callbackUrl();
-        Delivery delivery = new Delivery(request.eventId(), request.type(), subscription, "FAILED");
-        delivery = deliveryRepository.save(delivery);
 
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             long start = System.nanoTime();
