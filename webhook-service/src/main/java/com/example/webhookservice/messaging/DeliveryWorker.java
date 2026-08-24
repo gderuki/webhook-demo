@@ -9,6 +9,7 @@ import com.example.webhookservice.subscription.SubscriptionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -21,11 +22,17 @@ public class DeliveryWorker {
     private final DeliveryRepository deliveryRepository;
     private final SubscriptionRepository subscriptionRepository;
     private final NotificationSender notificationSender;
+    private final String workerName;
 
-    public DeliveryWorker(DeliveryRepository deliveryRepository, SubscriptionRepository subscriptionRepository, NotificationSender notificationSender) {
+    public DeliveryWorker(
+            DeliveryRepository deliveryRepository,
+            SubscriptionRepository subscriptionRepository,
+            NotificationSender notificationSender,
+            @Value("${WORKER_NAME:${HOSTNAME:worker}}") String workerName) {
         this.deliveryRepository = deliveryRepository;
         this.subscriptionRepository = subscriptionRepository;
         this.notificationSender = notificationSender;
+        this.workerName = workerName;
     }
 
     @RabbitListener(queues = "${webhook.delivery.queue:webhook-deliveries}")
@@ -44,8 +51,8 @@ public class DeliveryWorker {
         }
 
         NotificationRequest request = new NotificationRequest(message.eventType(), message.message(), message.eventId());
-        log.info("worker event={} subscription={} deliveryId={} callback={} started", message.eventId(), subscriptionOpt.get().id(), delivery.id(), subscriptionOpt.get().callbackUrl());
+        log.info("worker={} event={} subscription={} deliveryId={} callback={} started", workerName, message.eventId(), subscriptionOpt.get().id(), delivery.id(), subscriptionOpt.get().callbackUrl());
         boolean delivered = notificationSender.processDelivery(request, subscriptionOpt.get(), delivery);
-        log.info("worker event={} subscription={} deliveryId={} result={} finished", message.eventId(), subscriptionOpt.get().id(), delivery.id(), delivered ? "SUCCESS" : "FAILED");
+        log.info("worker={} event={} subscription={} deliveryId={} result={} finished", workerName, message.eventId(), subscriptionOpt.get().id(), delivery.id(), delivered ? "SUCCESS" : "FAILED");
     }
 }
